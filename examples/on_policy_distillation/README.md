@@ -36,6 +36,20 @@ This example shows how to run **on-policy distillation (OPD)** using miles. A sm
 - `run-qwen3-8B-opd.sh` launches an SGLang teacher server, then submits a Ray job that runs `train.py`.
 - `run-qwen3-8B-opd-megatron.sh` uses Megatron-loaded teacher model (no external server needed).
 
+## Cross-tokenizer OPD
+
+The default path assumes teacher and student share a tokenizer: the student token IDs are sent directly to the teacher. For heterogeneous teacher/student pairs, enable the cross-tokenizer path:
+
+```bash
+--opd-cross-tokenizer \
+--opd-teacher-tokenizer /path/to/teacher-hf-checkpoint \
+--opd-student-tokenizer /path/to/student-hf-checkpoint
+```
+
+`--opd-student-tokenizer` defaults to `--hf-checkpoint` when omitted. In this mode, miles decodes the student rollout, re-tokenizes the same text with the teacher tokenizer, asks the teacher to score those teacher token IDs, then aligns teacher token logprobs back to student response tokens by decoded character spans. This keeps the training-side OPD contract unchanged (`teacher_log_probs` has one value per student response token) while avoiding the invalid “student token IDs interpreted by teacher vocab” failure mode.
+
+This first implementation is a text/span likelihood bridge. It does not yet implement full SimCT-style multi-token candidate continuation distributions or ULD/GOLD-style merged top-k logit losses.
+
 ## Running the example
 
 ### Using SGLang Teacher (External Server)

@@ -1554,6 +1554,31 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--opd-cross-tokenizer",
+                action="store_true",
+                default=False,
+                help=(
+                    "Enable cross-tokenizer on-policy distillation in the built-in OPD reward helper. "
+                    "The student rollout is decoded as text, re-tokenized with the teacher tokenizer, "
+                    "then teacher logprobs are aligned back to student response tokens."
+                ),
+            )
+            parser.add_argument(
+                "--opd-student-tokenizer",
+                type=str,
+                default=None,
+                help=(
+                    "Tokenizer used to decode student rollouts for --opd-cross-tokenizer. "
+                    "Defaults to --hf-checkpoint."
+                ),
+            )
+            parser.add_argument(
+                "--opd-teacher-tokenizer",
+                type=str,
+                default=None,
+                help="Teacher tokenizer used to re-tokenize decoded student rollouts for --opd-cross-tokenizer.",
+            )
+            parser.add_argument(
                 "--custom-convert-samples-to-train-data-path",
                 type=str,
                 default=None,
@@ -2181,6 +2206,12 @@ def miles_validate_args(args):
 
     if args.eval_reward_key is None:
         args.eval_reward_key = args.reward_key
+
+    if args.opd_cross_tokenizer:
+        assert args.opd_teacher_tokenizer is not None, "--opd-cross-tokenizer requires --opd-teacher-tokenizer"
+        assert (
+            args.opd_student_tokenizer is not None or args.hf_checkpoint is not None
+        ), "--opd-cross-tokenizer requires --opd-student-tokenizer or --hf-checkpoint"
 
     if args.dump_details is not None:
         args.save_debug_rollout_data = f"{args.dump_details}/rollout_data/{{rollout_id}}.pt"

@@ -74,6 +74,10 @@ RM_ARGS=(
    --custom-rm-path examples.on_policy_distillation.on_policy_distillation.reward_func
    --custom-reward-post-process-path examples.on_policy_distillation.on_policy_distillation.post_process_rewards
    --rm-url http://$TEACHER_IP:$TEACHER_PORT/generate
+   # Enable these when teacher and student use different tokenizers.
+   # --opd-cross-tokenizer
+   # --opd-teacher-tokenizer /root/Qwen3-32B
+   # --opd-student-tokenizer /root/Qwen3-8B
 )
 
 EVAL_ARGS=(

@@ -352,6 +352,7 @@ PYTHONUNBUFFERED=1 srun --overlap --nodes=1 --ntasks=1 -w "${HEAD_NODE}" \
 
     CKPT_ARGS=(
       --hf-checkpoint ${STUDENT_HF_ROOT}
+      --megatron-to-hf-mode bridge
       --ref-load ${STUDENT_REF_ROOT}
       --load ${OUTPUTS_ROOT}/${RUN_NAME}
       --save ${OUTPUTS_ROOT}/${RUN_NAME}

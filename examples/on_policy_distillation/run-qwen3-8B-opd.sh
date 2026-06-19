@@ -74,10 +74,13 @@ RM_ARGS=(
    --custom-rm-path examples.on_policy_distillation.on_policy_distillation.reward_func
    --custom-reward-post-process-path examples.on_policy_distillation.on_policy_distillation.post_process_rewards
    --rm-url http://$TEACHER_IP:$TEACHER_PORT/generate
-   # Enable these when teacher and student use different tokenizers.
+   # Enable these when teacher and student use different tokenizers, e.g. a Qwen3-32B
+   # teacher scoring a Llama-3-8B student. The student rollout is decoded to text,
+   # re-tokenized with the teacher tokenizer, scored by the teacher server, then
+   # teacher logprobs are aligned back to student tokens via character-span overlap.
    # --opd-cross-tokenizer
-   # --opd-teacher-tokenizer /root/Qwen3-32B
-   # --opd-student-tokenizer /root/Qwen3-8B
+   # --opd-cross-teacher-tokenizer /root/Qwen3-32B
+   # --opd-cross-student-tokenizer /root/Qwen3-8B  # optional if --hf-checkpoint is set
 )
 
 EVAL_ARGS=(

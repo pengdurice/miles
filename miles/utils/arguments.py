@@ -1127,6 +1127,36 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--opd-teacher-ckpt-step", type=int, default=None, help="The checkpoint step for OPD teacher model."
             )
+            parser.add_argument(
+                "--opd-cross-tokenizer",
+                action="store_true",
+                default=False,
+                help=(
+                    "Enable cross-tokenizer mode for sglang OPD. The student rollout is decoded to text, "
+                    "re-tokenized with the teacher tokenizer, scored by the teacher server, then teacher "
+                    "logprobs are aligned back to student response tokens via character-span overlap. "
+                    "Required when teacher and student use different tokenizers (e.g. Qwen3-32B teacher, "
+                    "Llama-3-8B student). Only valid with --opd-type=sglang."
+                ),
+            )
+            parser.add_argument(
+                "--opd-cross-teacher-tokenizer",
+                type=str,
+                default=None,
+                help=(
+                    "Path to the teacher HF checkpoint or tokenizer directory for --opd-cross-tokenizer. "
+                    "Required when --opd-cross-tokenizer is set."
+                ),
+            )
+            parser.add_argument(
+                "--opd-cross-student-tokenizer",
+                type=str,
+                default=None,
+                help=(
+                    "Path to the student HF checkpoint or tokenizer directory for --opd-cross-tokenizer. "
+                    "Defaults to --hf-checkpoint when not set."
+                ),
+            )
             return parser
 
         def add_lora_arguments(parser):
@@ -1552,31 +1582,6 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help=(
                     "Path to the custom function that will post process reward, by default it will be the normalization for grpo. "
                 ),
-            )
-            parser.add_argument(
-                "--opd-cross-tokenizer",
-                action="store_true",
-                default=False,
-                help=(
-                    "Enable cross-tokenizer on-policy distillation in the built-in OPD reward helper. "
-                    "The student rollout is decoded as text, re-tokenized with the teacher tokenizer, "
-                    "then teacher logprobs are aligned back to student response tokens."
-                ),
-            )
-            parser.add_argument(
-                "--opd-student-tokenizer",
-                type=str,
-                default=None,
-                help=(
-                    "Tokenizer used to decode student rollouts for --opd-cross-tokenizer. "
-                    "Defaults to --hf-checkpoint."
-                ),
-            )
-            parser.add_argument(
-                "--opd-teacher-tokenizer",
-                type=str,
-                default=None,
-                help="Teacher tokenizer used to re-tokenize decoded student rollouts for --opd-cross-tokenizer.",
             )
             parser.add_argument(
                 "--custom-convert-samples-to-train-data-path",
@@ -2113,6 +2118,23 @@ def miles_validate_args(args):
     else:
         if args.opd_teacher_load is not None:
             raise ValueError("--opd-teacher-load is set but --use-opd is not enabled. Please add --use-opd flag.")
+            if args.opd_cross_tokenizer:
+                if args.opd_cross_teacher_tokenizer is None:
+                    raise ValueError(
+                        "--opd-cross-teacher-tokenizer is required when --opd-cross-tokenizer is set."
+                    )
+                if args.opd_cross_student_tokenizer is None and args.hf_checkpoint is None:
+                    raise ValueError(
+                        "--opd-cross-tokenizer requires --opd-cross-student-tokenizer or --hf-checkpoint "
+                        "to identify the student tokenizer."
+                    )
+        if args.opd_cross_tokenizer and args.opd_type != "sglang":
+            raise ValueError("--opd-cross-tokenizer is only supported with --opd-type=sglang.")
+    else:
+        if args.opd_teacher_load is not None:
+            raise ValueError("--opd-teacher-load is set but --use-opd is not enabled. Please add --use-opd flag.")
+        if args.opd_cross_tokenizer:
+            raise ValueError("--opd-cross-tokenizer is set but --use-opd is not enabled. Please add --use-opd flag.")
 
     # TODO: During loading, we need to set the start_rollout_id here.
     if args.megatron_to_hf_mode == "bridge":
@@ -2206,12 +2228,6 @@ def miles_validate_args(args):
 
     if args.eval_reward_key is None:
         args.eval_reward_key = args.reward_key
-
-    if args.opd_cross_tokenizer:
-        assert args.opd_teacher_tokenizer is not None, "--opd-cross-tokenizer requires --opd-teacher-tokenizer"
-        assert (
-            args.opd_student_tokenizer is not None or args.hf_checkpoint is not None
-        ), "--opd-cross-tokenizer requires --opd-student-tokenizer or --hf-checkpoint"
 
     if args.dump_details is not None:
         args.save_debug_rollout_data = f"{args.dump_details}/rollout_data/{{rollout_id}}.pt"

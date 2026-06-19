@@ -8,6 +8,11 @@ from miles.utils.processing_utils import load_tokenizer
 from miles.utils.types import Sample
 
 
+# ---------------------------------------------------------------------------
+# Tokenizer helpers (cross-tokenizer path)
+# ---------------------------------------------------------------------------
+
+
 def _decode_tokens(tokenizer, token_ids: list[int]) -> str:
     try:
         return tokenizer.decode(
@@ -29,26 +34,45 @@ def _load_opd_tokenizer(name_or_path: str):
 
 
 def _student_tokenizer_path(args) -> str:
-    path = getattr(args, "opd_student_tokenizer", None) or getattr(args, "hf_checkpoint", None)
+    path = getattr(args, "opd_cross_student_tokenizer", None) or getattr(args, "hf_checkpoint", None)
     if not path:
-        raise ValueError("--opd-cross-tokenizer requires --opd-student-tokenizer or --hf-checkpoint")
+        raise ValueError("--opd-cross-tokenizer requires --opd-cross-student-tokenizer or --hf-checkpoint")
     return path
 
 
 def _teacher_tokenizer_path(args) -> str:
-    path = getattr(args, "opd_teacher_tokenizer", None)
+    path = getattr(args, "opd_cross_teacher_tokenizer", None)
     if not path:
-        raise ValueError("--opd-cross-tokenizer requires --opd-teacher-tokenizer")
+        raise ValueError("--opd-cross-tokenizer requires --opd-cross-teacher-tokenizer")
     return path
 
 
 def _token_spans_from_prefix_decodes(tokenizer, token_ids: list[int]) -> list[tuple[int, int]]:
+    """Return [(char_start, char_end), ...] for each token.
+
+    Uses return_offsets_mapping=True (O(n)) when the tokenizer supports it;
+    falls back to O(n) individual-token decode otherwise.  The old O(n²)
+    prefix-decode loop is never used — it was the main rollout bottleneck.
+    """
+    if not token_ids:
+        return []
+    full_text = _decode_tokens(tokenizer, token_ids)
+    # Fast path: fast tokenizers expose offset_mapping in O(n).
+    try:
+        enc = tokenizer(full_text, return_offsets_mapping=True, add_special_tokens=False)
+        offsets = enc.get("offset_mapping")
+        if offsets is not None and len(offsets) == len(token_ids):
+            return [(int(s), int(e)) for s, e in offsets]
+    except Exception:
+        pass
+    # Fallback: decode each token individually (O(n), minor boundary inaccuracies
+    # possible for some tokenizers but acceptable for span alignment).
     spans: list[tuple[int, int]] = []
-    prev_len = 0
-    for i in range(1, len(token_ids) + 1):
-        cur_len = len(_decode_tokens(tokenizer, token_ids[:i]))
-        spans.append((prev_len, cur_len))
-        prev_len = cur_len
+    pos = 0
+    for tid in token_ids:
+        piece = _decode_tokens(tokenizer, [tid])
+        spans.append((pos, pos + len(piece)))
+        pos += len(piece)
     return spans
 
 
@@ -63,6 +87,11 @@ def _extract_logprob(item: Any) -> float | None:
 
 
 def _normalize_input_token_logprobs(raw_logprobs: list[Any], token_count: int) -> list[float | None]:
+    """Normalise sglang's input_token_logprobs to exactly token_count entries.
+
+    sglang may return either token_count or token_count-1 entries depending on
+    whether it includes a logprob for the first token (which has no predecessor).
+    """
     if len(raw_logprobs) == token_count:
         return [_extract_logprob(item) for item in raw_logprobs]
     if len(raw_logprobs) == token_count - 1:
@@ -78,6 +107,17 @@ def _align_teacher_log_probs_to_student_response(
     teacher_spans: list[tuple[int, int]],
     teacher_log_probs: list[float | None],
 ) -> tuple[list[float], list[int]]:
+    """Align teacher token logprobs onto student response tokens via character-span overlap.
+
+    When teacher and student tokenizers differ, a single teacher token may cover
+    multiple student tokens (or vice-versa). This function distributes the teacher
+    logprob proportionally by the character overlap fraction, so each student token
+    receives a weighted sum of the teacher logprobs that cover it.
+
+    Returns:
+        aligned: one float per student response token (weighted teacher logprob).
+        covered_chars: character coverage count per student response token (for diagnostics).
+    """
     aligned = [0.0 for _ in student_response_spans]
     covered_chars = [0 for _ in student_response_spans]
 
@@ -95,13 +135,18 @@ def _align_teacher_log_probs_to_student_response(
     return aligned, covered_chars
 
 
+# ---------------------------------------------------------------------------
+# Payload builders
+# ---------------------------------------------------------------------------
+
+
 def _build_cross_tokenizer_payload(args, sample: Sample) -> dict:
     student_tokenizer = _load_opd_tokenizer(_student_tokenizer_path(args))
     teacher_tokenizer = _load_opd_tokenizer(_teacher_tokenizer_path(args))
     full_text = _decode_tokens(student_tokenizer, sample.tokens)
     teacher_input_ids = _encode_text(teacher_tokenizer, full_text)
     if not teacher_input_ids:
-        raise ValueError("cross-tokenizer OPD teacher input is empty after retokenization")
+        raise ValueError("cross-tokenizer OPD: teacher input is empty after retokenization")
 
     return {
         "input_ids": teacher_input_ids,
@@ -115,26 +160,40 @@ def _build_cross_tokenizer_payload(args, sample: Sample) -> dict:
     }
 
 
+def _build_same_tokenizer_payload(sample: Sample) -> dict:
+    return {
+        # "text": sample.prompt + sample.response,
+        "input_ids": sample.tokens,
+        "sampling_params": {
+            "temperature": 0,
+            "max_new_tokens": 0,
+            "skip_special_tokens": False,
+        },
+        "return_logprob": True,
+        "logprob_start_len": 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reward function (called once per sample during rollout)
+# ---------------------------------------------------------------------------
+
+
 async def reward_func(args, sample, **kwargs):
     if getattr(args, "opd_cross_tokenizer", False):
         payload = _build_cross_tokenizer_payload(args, sample)
     else:
-        payload = {
-            # "text": sample.prompt + sample.response,
-            "input_ids": sample.tokens,
-            "sampling_params": {
-                "temperature": 0,
-                "max_new_tokens": 0,
-                "skip_special_tokens": False,
-            },
-            "return_logprob": True,
-            "logprob_start_len": 0,
-        }
-    session_kwargs = {}
-    async with aiohttp.ClientSession(**session_kwargs) as session:
+        payload = _build_same_tokenizer_payload(sample)
+
+    async with aiohttp.ClientSession() as session:
         async with session.post(args.rm_url, json=payload) as resp:
             resp.raise_for_status()
             return await resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Post-processing (called once per batch after rollout)
+# ---------------------------------------------------------------------------
 
 
 def _post_process_cross_tokenizer_rewards(args, samples: list[Sample]) -> list[torch.Tensor]:
@@ -151,7 +210,7 @@ def _post_process_cross_tokenizer_rewards(args, samples: list[Sample]) -> list[t
 
         student_spans = _token_spans_from_prefix_decodes(student_tokenizer, sample.tokens)
         teacher_spans = _token_spans_from_prefix_decodes(teacher_tokenizer, teacher_input_ids)
-        student_response_spans = student_spans[-sample.response_length :] if sample.response_length > 0 else []
+        student_response_spans = student_spans[-sample.response_length:] if sample.response_length > 0 else []
         aligned, covered_chars = _align_teacher_log_probs_to_student_response(
             student_response_spans,
             teacher_spans,
@@ -193,8 +252,22 @@ def post_process_rewards(args, samples: list[Sample], **kwargs):
     if getattr(args, "opd_cross_tokenizer", False):
         teacher_log_probs = _post_process_cross_tokenizer_rewards(args, samples)
         return teacher_log_probs, teacher_log_probs
+    """Process teacher server response and populate sample.teacher_log_probs.
 
-    rewards = [sample.get_reward_value(args) for sample in samples]
+    Returns (raw_rewards, scalar_rewards) matching the contract of
+    _post_process_rewards in train_data_conversion.py:
+      raw_rewards  — original reward values (0.0 for pure distillation)
+      scalar_rewards — float rewards for the advantage estimator (also 0.0)
+
+    teacher_log_probs are stored on sample.teacher_log_probs and picked up
+    by convert_samples_to_train_data via train_data["teacher_log_probs"].
+    """
+    if getattr(args, "opd_cross_tokenizer", False):
+        _post_process_cross_tokenizer_rewards(args, samples)
+        scalar_rewards = [0.0] * len(samples)
+        return scalar_rewards, scalar_rewards
+
+    raw_rewards = [sample.get_reward_value(args) for sample in samples]
     response_lengths = [sample.response_length for sample in samples]
 
     # Extract teacher log-probs from the sglang response

@@ -427,7 +427,7 @@ PYTHONUNBUFFERED=1 srun --overlap --nodes=1 --ntasks=1 -w "${HEAD_NODE}" \
     )
 
     ray job submit --address=http://${MASTER_ADDR}:8265 \
-      --runtime-env-json='{\"env_vars\":{\"PYTHONPATH\":\"/root/Megatron-LM/\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"RAY_DEDUP_LOGS\":\"0\",\"NCCL_NVLS_ENABLE\":\"${HAS_NVLINK}\",\"NCCL_TIMEOUT\":\"3600\",\"no_proxy\":\"'\"\${no_proxy}\"'\"}}' \
+      --runtime-env-json='{\"env_vars\":{\"PYTHONPATH\":\"${MILES_ROOT}:/root/Megatron-LM/\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\",\"RAY_DEDUP_LOGS\":\"0\",\"NCCL_NVLS_ENABLE\":\"${HAS_NVLINK}\",\"NCCL_TIMEOUT\":\"3600\",\"no_proxy\":\"'\"\${no_proxy}\"'\"}}' \
       -- python3 train.py \
       --actor-num-nodes ${ACTOR_NODES} \
       --actor-num-gpus-per-node ${GPUS_PER_NODE} \

@@ -85,6 +85,25 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
     if args.normalize_advantages:
         advantages = normalize_advantages(args, advantages, loss_masks, total_lengths, response_lengths, max_seq_lens)
 
+    # Apply OPD KL penalty to advantages when --use-opd is enabled (after normalization,
+    # so GRPO whitening and OPD KL operate at independent scales)
+    if getattr(args, "use_opd", False) and getattr(args, "opd_kl_coef", 0.0) > 0:
+        teacher_log_probs_data = rollout_data.get("teacher_log_probs")
+        if teacher_log_probs_data is not None and log_probs is not None:
+            device = advantages[0].device
+            opd_kl_per_sample = []
+            for i in range(len(advantages)):
+                t_lp = teacher_log_probs_data[i].to(device=device)
+                # teacher_log_probs already trimmed in post_process_rewards, guard for safety
+                t_lp = t_lp[-response_lengths[i]:]
+                s_lp = log_probs[i]
+                # per-token reverse KL: log(p_teacher / p_student)
+                opd_kl = t_lp - s_lp
+                advantages[i] = advantages[i] + args.opd_kl_coef * opd_kl
+                opd_kl_per_sample.append(opd_kl.mean().item())
+            # store as list of floats so log_rollout_data averages it correctly
+            rollout_data["opd_reverse_kl"] = opd_kl_per_sample
+
     rollout_data["advantages"] = advantages
     rollout_data["returns"] = returns
 

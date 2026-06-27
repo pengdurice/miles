@@ -120,11 +120,11 @@ RUN_NAME=${RUN_NAME:-qwen3-8B-opd}
 # ---------- Run knobs ----------
 GPUS_PER_NODE=${SLURM_GPUS_ON_NODE:-8}
 NUM_ROLLOUT=${NUM_ROLLOUT:-300}
-MAX_RESPONSE_LEN=${MAX_RESPONSE_LEN:-16384}
-ROLLOUT_BATCH=${ROLLOUT_BATCH:-16}
+MAX_RESPONSE_LEN=${MAX_RESPONSE_LEN:-8192}
+ROLLOUT_BATCH=${ROLLOUT_BATCH:-8}
 N_SAMPLES=${N_SAMPLES:-4}
-GLOBAL_BATCH=${GLOBAL_BATCH:-64}
-OPD_KL_COEF=${OPD_KL_COEF:-1.0}
+GLOBAL_BATCH=${GLOBAL_BATCH:-32}
+OPD_KL_COEF=${OPD_KL_COEF:-0.5}
 SAVE_INTERVAL=${SAVE_INTERVAL:-20}
 
 # ---------- Topology ----------
@@ -255,7 +255,8 @@ srun --nodes=1 --ntasks=1 -w "${TEACHER_NODE}" \
       --port ${TEACHER_PORT} \
       --tp ${TEACHER_TP} \
       --mem-fraction-static ${TEACHER_MEM_FRAC} \
-      --chunked-prefill-size 4096
+      --chunked-prefill-size 8192 \
+      --max-running-requests 64
   " &
 RAY_LAUNCHER_PIDS+=($!)
 

@@ -2115,21 +2115,18 @@ def miles_validate_args(args):
                     "--opd-teacher-load should not be set when --opd-type=sglang. "
                     "In sglang mode, teacher log-probs are obtained from external server during rollout."
                 )
-    else:
-        if args.opd_teacher_load is not None:
-            raise ValueError("--opd-teacher-load is set but --use-opd is not enabled. Please add --use-opd flag.")
-            if args.opd_cross_tokenizer:
-                if args.opd_cross_teacher_tokenizer is None:
-                    raise ValueError(
-                        "--opd-cross-teacher-tokenizer is required when --opd-cross-tokenizer is set."
-                    )
-                if args.opd_cross_student_tokenizer is None and args.hf_checkpoint is None:
-                    raise ValueError(
-                        "--opd-cross-tokenizer requires --opd-cross-student-tokenizer or --hf-checkpoint "
-                        "to identify the student tokenizer."
-                    )
-        if args.opd_cross_tokenizer and args.opd_type != "sglang":
-            raise ValueError("--opd-cross-tokenizer is only supported with --opd-type=sglang.")
+        if args.opd_cross_tokenizer:
+            if args.opd_cross_teacher_tokenizer is None:
+                raise ValueError(
+                    "--opd-cross-teacher-tokenizer is required when --opd-cross-tokenizer is set."
+                )
+            if args.opd_cross_student_tokenizer is None and args.hf_checkpoint is None:
+                raise ValueError(
+                    "--opd-cross-tokenizer requires --opd-cross-student-tokenizer or --hf-checkpoint "
+                    "to identify the student tokenizer."
+                )
+            if args.opd_type != "sglang":
+                raise ValueError("--opd-cross-tokenizer is only supported with --opd-type=sglang.")
     else:
         if args.opd_teacher_load is not None:
             raise ValueError("--opd-teacher-load is set but --use-opd is not enabled. Please add --use-opd flag.")

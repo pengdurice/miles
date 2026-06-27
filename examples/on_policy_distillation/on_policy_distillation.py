@@ -248,20 +248,6 @@ def post_process_rewards(args, samples: list[Sample], **kwargs):
     For pure on-policy distillation without task rewards, we return 0.0 for each sample.
     The actual learning signal comes from the OPD KL penalty applied in compute_advantages_and_returns.
     """
-    raw_rewards = [sample.get_reward_value(args) for sample in samples]
-    if getattr(args, "opd_cross_tokenizer", False):
-        teacher_log_probs = _post_process_cross_tokenizer_rewards(args, samples)
-        return teacher_log_probs, teacher_log_probs
-    """Process teacher server response and populate sample.teacher_log_probs.
-
-    Returns (raw_rewards, scalar_rewards) matching the contract of
-    _post_process_rewards in train_data_conversion.py:
-      raw_rewards  — original reward values (0.0 for pure distillation)
-      scalar_rewards — float rewards for the advantage estimator (also 0.0)
-
-    teacher_log_probs are stored on sample.teacher_log_probs and picked up
-    by convert_samples_to_train_data via train_data["teacher_log_probs"].
-    """
     if getattr(args, "opd_cross_tokenizer", False):
         _post_process_cross_tokenizer_rewards(args, samples)
         scalar_rewards = [0.0] * len(samples)

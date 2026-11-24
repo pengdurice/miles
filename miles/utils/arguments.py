@@ -559,6 +559,22 @@ def _check_dataset_rewards(args, datasets: list[RolloutDatasetConfig]) -> None:
             )
 
 
+def _check_mixed_data_source_subclass(path: str) -> None:
+    """Refuse a --data-source-path that is not MixedRolloutDataSource or a subclass of it."""
+    # Local import: miles.rollout.data_source loads the tokenizer libraries, and only this check needs it.
+    from miles.rollout.data_source import MixedRolloutDataSource
+
+    refusal = (
+        f"--rollout-data-yaml-config needs MixedRolloutDataSource or a subclass of it; drop --data-source-path {path}"
+    )
+    try:
+        data_source_cls = load_function(path)
+    except (ImportError, AttributeError) as error:
+        raise ValueError(f"{refusal} (it does not load: {error})") from error
+    if not (isinstance(data_source_cls, type) and issubclass(data_source_cls, MixedRolloutDataSource)):
+        raise ValueError(refusal)
+
+
 def _validate_rollout_data_yaml_config(args) -> None:
     if args.rollout_data_yaml_config is None:
         return
@@ -613,11 +629,13 @@ def _validate_rollout_data_yaml_config(args) -> None:
         raise ValueError("--rollout-data-yaml-config needs --num-rollout; --num-epoch is not supported with it")
     if args.partial_rollout:
         raise ValueError("--rollout-data-yaml-config does not support --partial-rollout yet")
-    if args.data_source_path != _DEFAULT_DATA_SOURCE_PATH:
-        raise ValueError(
-            f"--rollout-data-yaml-config selects its own data source; drop --data-source-path {args.data_source_path}"
-        )
-    args.data_source_path = "miles.rollout.data_source.MixedRolloutDataSource"
+    mixed_path = "miles.rollout.data_source.MixedRolloutDataSource"
+    if args.data_source_path not in (_DEFAULT_DATA_SOURCE_PATH, mixed_path):
+        # A subclass of the mixer (for example one that draws all prompts of a rollout step from one dataset) keeps
+        # the YAML config, its validation and the per-dataset metrics; any other data source is still refused.
+        _check_mixed_data_source_subclass(args.data_source_path)
+        return
+    args.data_source_path = mixed_path
 
 
 def _compute_init_expected_num_cells(

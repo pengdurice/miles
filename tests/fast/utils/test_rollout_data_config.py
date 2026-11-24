@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from miles.ray.rollout.rollout_executor import _compute_rollout_function_config
+from miles.rollout.data_source import MixedRolloutDataSource
 from miles.utils.args.schema import Arg, BaseConfig
 from miles.utils.arguments import parse_args
 from miles.utils.function_registry import function_registry
@@ -207,8 +208,36 @@ class TestStartupValidation:
             _parse("--rollout-data-yaml-config", _inline(_with_dataset()), "--partial-rollout")
 
     def test_it_cannot_be_combined_with_a_custom_data_source(self):
-        with pytest.raises(ValueError, match="drop --data-source-path"):
+        with pytest.raises(ValueError, match="drop --data-source-path my_pkg.MySource .it does not load"):
             _parse("--rollout-data-yaml-config", _inline(_with_dataset()), "--data-source-path", "my_pkg.MySource")
+
+    def test_a_subclass_of_the_mixed_data_source_is_kept(self):
+        """A mixer subclass keeps the YAML datasets and their checks, for example to pick one dataset per step."""
+
+        class OneDatasetPerStep(MixedRolloutDataSource):
+            pass
+
+        with function_registry.temporary("test_mixed_subclass.OneDatasetPerStep", OneDatasetPerStep):
+            args = _parse(
+                "--rollout-data-yaml-config",
+                _inline(_with_dataset()),
+                "--data-source-path",
+                "test_mixed_subclass.OneDatasetPerStep",
+            )
+        assert args.data_source_path.path == "test_mixed_subclass.OneDatasetPerStep"
+
+    def test_a_data_source_that_is_not_a_mixer_subclass_is_refused(self):
+        class OtherSource:
+            pass
+
+        with function_registry.temporary("test_mixed_subclass.OtherSource", OtherSource):
+            with pytest.raises(ValueError, match="needs MixedRolloutDataSource or a subclass of it"):
+                _parse(
+                    "--rollout-data-yaml-config",
+                    _inline(_with_dataset()),
+                    "--data-source-path",
+                    "test_mixed_subclass.OtherSource",
+                )
 
     def test_it_cannot_be_combined_with_prompt_data(self):
         with pytest.raises(ValueError, match="replaces --prompt-data"):
